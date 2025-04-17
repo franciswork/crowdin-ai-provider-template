@@ -1,24 +1,22 @@
-const crowdinModule = require("@crowdin/app-project-module"); // Crowdin App development framework
-const serverless = require("serverless-http"); // this is to make the code work with AWS Lambda
-const OpenAI = require("openai");
-
-const express = crowdinModule.express; // The Express instance provided by the Crowdin framework implements some API for best application performance
+const crowdinModule = require("@crowdin/app-project-module");
+const serverless = require("serverless-http");
+const axios = require("axios");
+const express = crowdinModule.express;
 
 const app = express();
 app.use(express.json());
 
+const settingsForm = require("./settings-form").getForm();
+
+// Setup base configuration object
 const configuration = {
     baseUrl: process.env?.REPLIT_DEV_DOMAIN
         ? `https://${process.env.REPLIT_DEV_DOMAIN}`
         : process.env.URL,
-    // Required properties (baseUrl, port, clientId, clientSecret) are automatically loaded from .env file (can also be defined here in the code)
-    // For more details about configuration options, refer to the Crowdin App development framework documentation:
-    // https://crowdin.github.io/app-project-module/introduction/#basic-configuration
-    name: "Generic AI Integration",
-    identifier: "generic-ai",
-    description: "An AI integration for Crowdin",
-    imagePath: __dirname + "/logo.svg", // app's logo
-    // sqlite would be used locally, postgres would be used in production
+    name: "Widn AI",
+    identifier: "widn-ai",
+    description: "Your AI Language Assistant for Crowdin",
+    imagePath: "/logo.svg", // Assumes it's in /public/
     ...(process.env.DB_HOST && {
         postgreConfig: {
             host: process.env.DB_HOST,
@@ -27,114 +25,141 @@ const configuration = {
             database: process.env.DB_DATABASE,
         },
     }),
-    // this sample app implements Crowdin AI Provider interface
-    // https://crowdin.github.io/app-project-module/tools/ai-provider/
-    // it could provide UI and should provide the following methods two methods: getModelsList and chatCompletions
-    aiProvider: {
-        settingsUiModule: require("./settings-form").getForm(), // low code UI for the integration settings
-        getModelsList: async ({ client, context }) => {
-            // get app's settings
-            // https://crowdin.github.io/app-project-module/storage/#app-metadata
-            const formData = await crowdinApp.getMetadata(
-                `form-data-${context.jwtPayload.context.organization_id}`,
-            );
+};
 
-            const aiClient = new OpenAI({ apiKey: formData.key });
+// Attach Crowdin routes
+const crowdinApp = crowdinModule.addCrowdinEndpoints(app, configuration);
 
-            // fetch the list of models
-            const modelsResponse = await aiClient.models.list();
-            return (modelsResponse?.data || [])
-                .filter((model) => model.id)
-                .map((model) => ({
-                    //TODO: parse from model if available
-                    id: model.id.trim(),
-                    supportsJsonMode: true,
-                    supportsFunctionCalling: true,
-                    supportsStreaming: true,
-                    supportsVision: true,
-                    contextWindowLimit: 4096,
-                }));
-        },
-        chatCompletions: async ({
-            messages,
-            model,
-            action,
-            responseFormat,
-            client,
-            context,
-            req,
-        }) => {
-            const formData = await crowdinApp.getMetadata(
-                `form-data-${context.jwtPayload.context.organization_id}`,
-            );
+// Add AI provider methods after crowdinApp is available
+configuration.aiProvider = {
+    settingsUiModule: settingsForm,
 
-            const aiClient = new OpenAI({ apiKey: formData.key });
+    getModelsList: async ({ context }) => {
+        const formData = await crowdinApp.getMetadata(
+            `form-data-${context.jwtPayload.context.organization_id}`,
+        );
 
-            const response = await aiClient.chat.completions.create({
-                model,
-                messages,
-            });
+        return [
+            {
+                id: "sugarloaf",
+                supportsJsonMode: false,
+                supportsFunctionCalling: false,
+                supportsStreaming: true,
+                supportsVision: false,
+                contextWindowLimit: 4096,
+            },
+            {
+                id: "vesuvius",
+                supportsJsonMode: false,
+                supportsFunctionCalling: false,
+                supportsStreaming: true,
+                supportsVision: false,
+                contextWindowLimit: 4096,
+            },
+        ];
+    },
 
-            // learn how to stream the response https://crowdin.github.io/app-project-module/tools/ai-provider/#response-streaming
-            return [
+    chatCompletions: async function* ({ messages, model, action, context }) {
+        const formData = await crowdinApp.getMetadata(
+            `form-data-${context.jwtPayload.context.organization_id}`,
+        );
+
+        try {
+            const response = await axios.post(
+                "https://api.widn.ai/completions",
                 {
-                    content: response?.choices?.[0]?.message?.content || "",
+                    model,
+                    messages,
+                    temperature: action?.temperature ?? 0.7,
+                    max_tokens: action?.max_tokens ?? 150,
+                    top_p: action?.top_p ?? 0.9,
+                    min_p: action?.min_p ?? 0.1,
+                    stream: true,
                 },
-            ];
-        },
+                {
+                    headers: {
+                        Authorization: `Bearer ${formData.key}`,
+                        "Content-Type": "application/json",
+                    },
+                    responseType: "stream",
+                },
+            );
+
+            const stream = response.data;
+            let buffer = "";
+
+            for await (const chunk of stream) {
+                buffer += chunk.toString();
+                const lines = buffer.split("\n").filter(Boolean);
+
+                for (const line of lines) {
+                    if (line === "data: [DONE]") return;
+
+                    try {
+                        const json = JSON.parse(line.replace(/^data: /, ""));
+                        const delta = json?.delta?.content;
+                        if (delta) yield { content: delta };
+                    } catch (e) {
+                        console.error("Failed to parse stream chunk", e);
+                    }
+                }
+            }
+        } catch (err) {
+            console.error("Streaming error:", err);
+            yield { content: "[Error streaming response]" };
+        }
     },
 };
 
-// This is optional, as we want to validate the credentials before saving them.
-// If you don't need to validate the credentials, you can remove this endpoint, the low code UI would save the credentials on form submission.
+// Credentials check and form submission
 app.post(
     "/form",
-    crowdinModule.postRequestCredentialsMasker(
-        require("./settings-form").getForm(),
-    ), // mask the credentials
+    crowdinModule.postRequestCredentialsMasker(settingsForm),
     async (req, res) => {
-        const { client, context } = await crowdinApp.establishCrowdinConnection(
-            req.query.jwtToken,
-        );
-        const formData = req.body.data;
-
         try {
-            const aiClient = new OpenAI({ apiKey: formData.key });
+            const { client, context } = await crowdinApp.establishCrowdinConnection(
+                req.query.jwtToken,
+            );
+            const formData = req.body.data;
 
-            // Quick check to see if the credentials are valid
-            await aiClient.chat.completions.create({
-                model: "gpt-3.5-turbo", // any valid model name
-                messages: [{ role: "user", content: "Say hello" }],
-            });
+            // Test request to validate credentials
+            const response = await axios.post(
+                "https://api.widn.ai/completions",
+                {
+                    model: "vesuvius",
+                    messages: [{ role: "user", content: "Say hello" }],
+                    temperature: 0.2,
+                    max_tokens: 50,
+                    stream: false,
+                },
+                {
+                    headers: {
+                        Authorization: `Bearer ${formData.key}`,
+                        "Content-Type": "application/json",
+                    },
+                },
+            );
 
-            // Store app's configuration if successful
             await crowdinApp.saveMetadata(
                 `form-data-${context.jwtPayload.context.organization_id}`,
                 formData,
             );
+
             res.status(200).send({
-                message:
-                    "Credentials are valid. The integration is ready to use.",
+                message: "Credentials are valid. The integration is ready to use.",
             });
         } catch (e) {
-            console.error(e);
+            console.error("Form validation error:", e);
             res.status(400).send({
-                message: `Credentials are invalid. Response: ${e.response?.data?.error?.message || e.message || "Invalid credentials"}`,
+                message: `Credentials are invalid. Response: ${
+                    e.response?.data?.error || e.message || "Invalid credentials"
+                }`,
             });
         }
     },
 );
 
-// Attach Crowdin app endpoints
-const crowdinApp = crowdinModule.addCrowdinEndpoints(app, configuration);
-
-// Export for serverless or run express locally
-if (process.env.DB_HOST) {
-    module.exports.handler = serverless(app);
-} else {
-    app.listen(process.env.PORT || 3000, () =>
-        console.info(
-            `Crowdin app listening on port ${process.env.PORT || 3000}`,
-        ),
-    );
-}
+// Export for Vercel
+module.exports = {
+    handler: serverless(app),
+};
