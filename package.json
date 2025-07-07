@@ -13,13 +13,13 @@
     "@crowdin/app-project-module": "^0.81.1",
     "@crowdin/crowdin-apps-functions": "^0.12.0",
     "axios": "^1.8.4",
+    "better-sqlite3": "^11.9.1",
     "body-parser": "^2.2.0",
-    "openai": "^4.91.0",
     "serverless-http": "^3.2.0"
   },
   "devDependencies": {
     "dotenv": "^16.4.7",
     "env-cmd": "^10.1.0",
-    "nodemon": "^3.1.9"
+    "nodemon": "^3.1.10"
   }
 }

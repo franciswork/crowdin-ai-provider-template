@@ -6,15 +6,15 @@ exports.getForm = () => {
         maskPasswords: true,
         environments: ['crowdin-enterprise', 'crowdin'],
         formSchema: {
-            title: "AI Integration Setup",
-            description: "Configure the AI integration credentials.",
+            title: "WidnAI Integration Setup",
+            description: "Configure the integration with your WidnAI credentials.",
             type: "object",
             required: ["key"],
             properties: {
                 key: {
                     type: "string",
                     title: "API Key",
-                    description: "Enter your AI API key here.",
+                    description: "Enter your WidnAI API key here.",
                 },
             }
         },

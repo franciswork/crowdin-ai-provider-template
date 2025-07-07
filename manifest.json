@@ -1,0 +1,30 @@
+{
+    "identifier": "widn-ai",
+    "name": "Widn AI",
+    "logo": "/widnLogo.png",
+    "baseUrl": "https://a970-203-128-79-245.ngrok-free.app",
+    "authentication": {
+      "type": "crowdin_app",
+      "clientId": "9DYnKcPicpKPV7S86QjI"
+    },
+    "events": {
+      "installed": "/installed",
+      "uninstall": "/uninstall"
+    },
+    "scopes": [
+      "project"
+    ],
+    "modules": {
+      "ai-provider": [
+        {
+          "key": "widn-ai-aiprovider",
+          "name": "Widn AI",
+          "description": "Your AI Language Assistant for Crowdin",
+          "logo": "/widnLogo.png",
+          "chatCompletionsUrl": "/ai-provider/completions",
+          "modelsUrl": "/ai-provider/models",
+          "url": "/settings/index.html"
+        }
+      ]
+    }
+  }
